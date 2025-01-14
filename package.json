@@ -9,11 +9,9 @@
         "preview": "vite preview"
     },
     "dependencies": {
-        "@use-gesture/react": "^10.3.1",
+        "pixi.js": "^8.6.6",
         "react": "^19.0.0",
-        "react-dom": "^19.0.0",
-        "react-virtualized-auto-sizer": "^1.0.25",
-        "react-window": "^1.8.11"
+        "react-dom": "^19.0.0"
     },
     "devDependencies": {
         "@biomejs/biome": "^1.8.3",

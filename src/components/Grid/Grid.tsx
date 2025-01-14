@@ -1,72 +1,154 @@
-import { useDrag } from '@use-gesture/react'
-import { useRef } from 'react'
-import AutoSizer from 'react-virtualized-auto-sizer'
-import { FixedSizeGrid as Grid } from 'react-window'
-import styles from './Grid.module.css'
+import { Application, Container, Text } from 'pixi.js'
+import { useCallback, useEffect, useRef } from 'react'
+import { ChunkManager } from './ChunkManager'
+import { GridControls } from './GridControls'
 
-function SquareGrid() {
-    const gridOuterRef = useRef<HTMLDivElement>(null)
-    const draggableRef = useRef<HTMLDivElement>(null)
+function Grid() {
+    const pixiContainer = useRef<HTMLDivElement>(null)
+    const app = useRef<Application | undefined>(undefined)
+    const mainContainer = useRef<Container>(new Container())
+    const chunkManager = useRef<ChunkManager | undefined>(undefined)
+    const gridControls = useRef<GridControls | undefined>(undefined)
+    const fpsText = useRef<Text | undefined>(undefined)
 
-    const columnCount = 100
-    const rowCount = 100
-    const columnWidth = 50
-    const rowHeight = 50
+    const getViewportBounds = useCallback(() => {
+        if (!app.current || !mainContainer.current) {
+            throw new Error('App not initialized')
+        }
 
-    const Cell = ({
-        columnIndex,
-        rowIndex,
-        style,
-    }: {
-        columnIndex: number
-        rowIndex: number
-        style: React.CSSProperties
-    }) => {
-        return (
-            <div className={styles.cell} style={style}>
-                {`${rowIndex}, ${columnIndex}`}
-            </div>
-        )
-    }
+        return {
+            left: -mainContainer.current.position.x,
+            right: -mainContainer.current.position.x + app.current.screen.width,
+            top: -mainContainer.current.position.y,
+            bottom:
+                -mainContainer.current.position.y + app.current.screen.height,
+        }
+    }, [])
 
-    useDrag(
-        ({ delta: [dx, dy], down }) => {
-            if (!gridOuterRef.current) return
+    // Function to clean up Pixi application
+    const cleanup = useCallback(() => {
+        if (app.current) {
+            gridControls.current?.cleanup()
+            chunkManager.current?.cleanup()
 
-            gridOuterRef.current.scrollLeft -= dx
-            gridOuterRef.current.scrollTop -= dy
-        },
-        {
-            target: draggableRef,
-        },
-    )
+            // Clean up containers
+            mainContainer.current.destroy()
+            mainContainer.current = new Container()
+
+            // Clean up app
+            app.current.stage.removeChildren()
+            app.current.canvas.remove()
+            app.current.destroy(true, { children: true })
+            app.current = undefined
+        }
+
+        // Clean up any orphaned canvases
+        if (pixiContainer.current) {
+            const canvases =
+                pixiContainer.current.getElementsByTagName('canvas')
+            for (let i = canvases.length - 1; i >= 0; i--) {
+                canvases[i].remove()
+            }
+        }
+    }, [])
+
+    useEffect(() => {
+        let mounted = true
+
+        const initPixi = async () => {
+            if (!pixiContainer.current || !mounted) return
+
+            cleanup()
+
+            const newApp = new Application()
+            await newApp.init({
+                width: window.innerWidth,
+                height: window.innerHeight,
+                antialias: true,
+                backgroundColor: 0xffffff,
+                resolution: window.devicePixelRatio || 1,
+            })
+
+            if (!mounted) {
+                newApp.destroy()
+                return
+            }
+
+            app.current = newApp
+            pixiContainer.current.appendChild(app.current.canvas)
+
+            // Center the view on 0,0
+            mainContainer.current.position.set(
+                app.current.screen.width / 2,
+                app.current.screen.height / 2,
+            )
+
+            app.current.stage.addChild(mainContainer.current)
+
+            // Initialize managers
+            chunkManager.current = new ChunkManager(mainContainer.current)
+            gridControls.current = new GridControls(
+                mainContainer.current,
+                chunkManager.current,
+                getViewportBounds,
+            )
+
+            // Add FPS counter
+            fpsText.current = new Text('FPS: 0', {
+                fill: 0x000000,
+                fontSize: 16,
+            })
+            fpsText.current.position.set(10, 10)
+            app.current.stage.addChild(fpsText.current)
+
+            // Update FPS counter every 500ms
+            let lastFpsUpdate = 0
+            app.current.ticker.add(() => {
+                if (fpsText.current && app.current) {
+                    const now = Date.now()
+                    if (now - lastFpsUpdate >= 500) {
+                        fpsText.current.text = `FPS: ${Math.round(app.current.ticker.FPS)}`
+                        lastFpsUpdate = now
+                    }
+                }
+            })
+
+            // Initial chunk update
+            chunkManager.current.updateVisibleChunks(getViewportBounds())
+        }
+
+        initPixi()
+
+        const handleResize = () => {
+            if (app.current && chunkManager.current) {
+                app.current.renderer.resize(
+                    window.innerWidth,
+                    window.innerHeight,
+                )
+                chunkManager.current.updateVisibleChunks(getViewportBounds())
+            }
+        }
+
+        window.addEventListener('resize', handleResize)
+
+        return () => {
+            mounted = false
+            window.removeEventListener('resize', handleResize)
+            cleanup()
+        }
+    }, [cleanup, getViewportBounds])
 
     return (
-        <div className={styles.wrapper}>
-            <AutoSizer>
-                {({ width, height }) => (
-                    <Grid
-                        className={styles.grid}
-                        outerRef={gridOuterRef}
-                        columnCount={columnCount}
-                        columnWidth={columnWidth}
-                        height={height}
-                        rowCount={rowCount}
-                        rowHeight={rowHeight}
-                        width={width}
-                        overscanColumnCount={0}
-                        overscanRowCount={0}
-                        style={{
-                            overflow: 'hidden',
-                        }}
-                    >
-                        {Cell}
-                    </Grid>
-                )}
-            </AutoSizer>
-            <div ref={draggableRef} className={styles.draggable} />
-        </div>
+        <div
+            ref={pixiContainer}
+            style={{
+                width: '100vw',
+                height: '100vh',
+                margin: 0,
+                overflow: 'hidden',
+            }}
+        />
     )
 }
 
-export default SquareGrid
+export default Grid
