@@ -1,66 +1,48 @@
-import { Application, Container, Text } from 'pixi.js'
-import { useCallback, useEffect, useRef } from 'react'
+import { Stats } from 'pixi-stats'
+import { Application, Container } from 'pixi.js'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { ChunkManager } from './ChunkManager'
-import { GridControls } from './GridControls'
+import { GridNavigation } from './GridNavigation'
 
 function Grid() {
-    const pixiContainer = useRef<HTMLDivElement>(null)
-    const app = useRef<Application | undefined>(undefined)
-    const mainContainer = useRef<Container>(new Container())
+    const [app, setApp] = useState<Application | undefined>(undefined)
+    const pixiCanvas = useRef<HTMLDivElement>(null)
+    const pixiContainer = useRef<Container>(new Container())
     const chunkManager = useRef<ChunkManager | undefined>(undefined)
-    const gridControls = useRef<GridControls | undefined>(undefined)
-    const fpsText = useRef<Text | undefined>(undefined)
+    const gridNavigation = useRef<GridNavigation | undefined>(undefined)
 
-    const getViewportBounds = useCallback(() => {
-        if (!app.current || !mainContainer.current) {
-            throw new Error('App not initialized')
-        }
-
-        return {
-            left: -mainContainer.current.position.x,
-            right: -mainContainer.current.position.x + app.current.screen.width,
-            top: -mainContainer.current.position.y,
-            bottom:
-                -mainContainer.current.position.y + app.current.screen.height,
-        }
-    }, [])
-
-    // Function to clean up Pixi application
     const cleanup = useCallback(() => {
-        if (app.current) {
-            gridControls.current?.cleanup()
-            chunkManager.current?.cleanup()
+        if (app) {
+            const navigation = gridNavigation.current
+            const manager = chunkManager.current
+            const container = pixiContainer.current
 
-            // Clean up containers
-            mainContainer.current.destroy()
-            mainContainer.current = new Container()
-
-            // Clean up app
-            app.current.stage.removeChildren()
-            app.current.canvas.remove()
-            app.current.destroy(true, { children: true })
-            app.current = undefined
-        }
-
-        // Clean up any orphaned canvases
-        if (pixiContainer.current) {
-            const canvases =
-                pixiContainer.current.getElementsByTagName('canvas')
-            for (let i = canvases.length - 1; i >= 0; i--) {
-                canvases[i].remove()
-            }
+            navigation?.cleanup()
+            manager?.cleanup()
+            container.destroy()
+            pixiContainer.current = new Container()
+            app.destroy(true, { children: true })
+            setApp(undefined) 
         }
     }, [])
 
     useEffect(() => {
-        let mounted = true
-
         const initPixi = async () => {
-            if (!pixiContainer.current || !mounted) return
+            if (!pixiCanvas.current) return
 
             cleanup()
 
             const newApp = new Application()
+
+            // remove div with #stats
+            const statsDiv = document.querySelector('#stats')
+            if (statsDiv) {
+                statsDiv.remove()
+            }
+            
+            // @ts-ignore
+            new Stats(newApp.renderer);
+            
             await newApp.init({
                 width: window.innerWidth,
                 height: window.innerHeight,
@@ -68,79 +50,51 @@ function Grid() {
                 backgroundColor: 0xffffff,
                 resolution: window.devicePixelRatio || 1,
             })
-
-            if (!mounted) {
-                newApp.destroy()
-                return
+            
+            const container = pixiContainer.current
+            
+            // Remove any existing canvas elements
+            if (pixiCanvas.current) {
+                const canvases = pixiCanvas.current.getElementsByTagName('canvas')
+                Array.from(canvases).forEach(canvas => canvas.remove())
             }
-
-            app.current = newApp
-            pixiContainer.current.appendChild(app.current.canvas)
+            pixiCanvas.current.appendChild(newApp.canvas)
 
             // Center the view on 0,0
-            mainContainer.current.position.set(
-                app.current.screen.width / 2,
-                app.current.screen.height / 2,
+            container.position.set(
+                newApp.screen.width / 2,
+                newApp.screen.height / 2,
             )
 
-            app.current.stage.addChild(mainContainer.current)
+            newApp.stage.addChild(container)
 
             // Initialize managers
-            chunkManager.current = new ChunkManager(mainContainer.current)
-            gridControls.current = new GridControls(
-                mainContainer.current,
-                chunkManager.current,
-                getViewportBounds,
+            const manager = new ChunkManager(container)
+            const navigation = new GridNavigation(
+                container,
+                manager,
+                newApp,
             )
 
-            // Add FPS counter
-            fpsText.current = new Text('FPS: 0', {
-                fill: 0x000000,
-                fontSize: 16,
-            })
-            fpsText.current.position.set(10, 10)
-            app.current.stage.addChild(fpsText.current)
-
-            // Update FPS counter every 500ms
-            let lastFpsUpdate = 0
-            app.current.ticker.add(() => {
-                if (fpsText.current && app.current) {
-                    const now = Date.now()
-                    if (now - lastFpsUpdate >= 500) {
-                        fpsText.current.text = `FPS: ${Math.round(app.current.ticker.FPS)}`
-                        lastFpsUpdate = now
-                    }
-                }
-            })
+            chunkManager.current = manager
+            gridNavigation.current = navigation
 
             // Initial chunk update
-            chunkManager.current.updateVisibleChunks(getViewportBounds())
+            manager.updateVisibleChunks(newApp, container)
+
+            setApp(newApp)
         }
 
         initPixi()
 
-        const handleResize = () => {
-            if (app.current && chunkManager.current) {
-                app.current.renderer.resize(
-                    window.innerWidth,
-                    window.innerHeight,
-                )
-                chunkManager.current.updateVisibleChunks(getViewportBounds())
-            }
-        }
-
-        window.addEventListener('resize', handleResize)
-
         return () => {
-            mounted = false
-            window.removeEventListener('resize', handleResize)
             cleanup()
         }
-    }, [cleanup, getViewportBounds])
+    }, [])
 
     return (
         <div
-            ref={pixiContainer}
+            ref={pixiCanvas}
             style={{
                 width: '100vw',
                 height: '100vh',

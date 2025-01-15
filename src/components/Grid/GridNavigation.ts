@@ -1,21 +1,14 @@
-import type { Container, FederatedPointerEvent } from 'pixi.js'
+import type { Application, Container, FederatedPointerEvent } from 'pixi.js'
 import type { ChunkManager } from './ChunkManager'
-import { CHUNK_UPDATE_THROTTLE } from './config'
 
-export class GridControls {
+export class GridNavigation {
     private isDragging = false
     private lastPosition = { x: 0, y: 0 }
-    private lastUpdateTime = 0
 
     constructor(
         private container: Container,
         private chunkManager: ChunkManager,
-        private getViewportBounds: () => {
-            left: number
-            right: number
-            top: number
-            bottom: number
-        },
+        private app: Application,
     ) {
         this.setupDragHandling()
     }
@@ -38,19 +31,11 @@ export class GridControls {
             this.container.y += dy
 
             this.lastPosition = { x: event.globalX, y: event.globalY }
-
-            // Throttle chunk updates during pan
-            const now = Date.now()
-            if (now - this.lastUpdateTime >= CHUNK_UPDATE_THROTTLE) {
-                this.chunkManager.updateVisibleChunks(this.getViewportBounds())
-                this.lastUpdateTime = now
-            }
         }
 
         const onDragEnd = () => {
             this.isDragging = false
-            // Final update after drag ends
-            this.chunkManager.updateVisibleChunks(this.getViewportBounds())
+            this.chunkManager.updateVisibleChunks(this.app, this.container)
         }
 
         this.container.on('pointerdown', onDragStart)
